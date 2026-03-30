@@ -1,0 +1,219 @@
+/*
+ * ╔══════════════════════════════════════════════════════════╗
+ * ║          ESP32 · BLUE LED DASHBOARD CONTROLLER          ║
+ * ║          Controlled via Supabase REST API               ║
+ * ╚══════════════════════════════════════════════════════════╝
+ *
+ * PIN   : D2 (GPIO2) — Built-in Blue LED on most ESP32 boards
+ * DEPS  : WiFi.h, HTTPClient.h, ArduinoJson (v6+)
+ */
+
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <ArduinoJson.h>
+
+// ─── USER CONFIG ──────────────────────────────────────────────
+const char* WIFI_SSID    = "NBSC FREE WIFI";
+const char* WIFI_PASS    = "";               // empty = open network
+
+const char* SUPABASE_URL = "https://kjfumdyatvvthmbzrhvm.supabase.co";
+const char* SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtqZnVtZHlhdHZ2dGhtYnpyaHZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MDE4ODksImV4cCI6MjA5MDM3Nzg4OX0.yVpYIQgYEm1W2W2pzsY5vphnACShkJA_mBRJK2soAPc";
+const char* TABLE_NAME   = "led_control";
+
+const int ROW_ID        = 1;
+const int POLL_INTERVAL = 2000;
+// ──────────────────────────────────────────────────────────────
+
+#define LED_PIN 2
+
+// ─── State ────────────────────────────────────────────────────
+bool ledOn   = false;
+bool blinkEn = false;
+int  speedMs = 500;
+
+// ─── Blink timing ─────────────────────────────────────────────
+unsigned long lastBlinkToggle = 0;
+bool          blinkPhase      = false;
+
+// ─── Poll timing ──────────────────────────────────────────────
+unsigned long lastPoll = 0;
+
+// ═════════════════════════════════════════════════════════════
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
+
+  Serial.println("\n╔═══════════════════════════════╗");
+  Serial.println(  "║   ESP32 LED Controller        ║");
+  Serial.println(  "╚═══════════════════════════════╝");
+
+  connectWiFi();
+
+  // Force first fetch right away
+  lastPoll = millis() - POLL_INTERVAL;
+}
+
+// ═════════════════════════════════════════════════════════════
+void loop() {
+  // ── 1. Check WiFi ─────────────────────────────────────────
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[WiFi] Lost — reconnecting...");
+    WiFi.disconnect();
+    delay(500);
+    connectWiFi();
+    return;
+  }
+
+  // ── 2. Poll Supabase on interval ──────────────────────────
+  if (millis() - lastPoll >= POLL_INTERVAL) {
+    lastPoll = millis();
+    fetchState();
+    applyLEDState();   // set pin cleanly right after fetch
+  }
+
+  // ── 3. Non-blocking blink ─────────────────────────────────
+  handleBlink();
+}
+
+// ═════════════════════════════════════════════════════════════
+//  Apply LED state once after fetch
+// ═════════════════════════════════════════════════════════════
+void applyLEDState() {
+  if (!ledOn) {
+    digitalWrite(LED_PIN, LOW);
+    blinkPhase = false;
+    return;
+  }
+  if (!blinkEn) {
+    digitalWrite(LED_PIN, HIGH);   // solid ON — handleBlink() won't touch this
+    blinkPhase = false;
+    return;
+  }
+  // Blink — let handleBlink() take over, reset timer
+  lastBlinkToggle = millis();
+  blinkPhase = true;
+  digitalWrite(LED_PIN, HIGH);
+}
+
+// ═════════════════════════════════════════════════════════════
+//  Non-blocking blink — skipped entirely when not in blink mode
+// ═════════════════════════════════════════════════════════════
+void handleBlink() {
+  if (!ledOn || !blinkEn) return;
+
+  unsigned long now = millis();
+  if (now - lastBlinkToggle >= (unsigned long)speedMs) {
+    lastBlinkToggle = now;
+    blinkPhase = !blinkPhase;
+    digitalWrite(LED_PIN, blinkPhase ? HIGH : LOW);
+  }
+}
+
+// ═════════════════════════════════════════════════════════════
+//  Supabase fetch with full diagnostics
+// ═════════════════════════════════════════════════════════════
+void fetchState() {
+  HTTPClient http;
+
+  String url = String(SUPABASE_URL)
+             + "/rest/v1/" + TABLE_NAME
+             + "?id=eq." + ROW_ID
+             + "&select=led_on,blink,speed_ms";
+
+  Serial.println("[Fetch] " + url);
+
+  http.begin(url);
+  http.addHeader("apikey",        SUPABASE_KEY);
+  http.addHeader("Authorization", String("Bearer ") + SUPABASE_KEY);
+  http.addHeader("Accept",        "application/json");
+  http.setTimeout(5000);
+
+  int code = http.GET();
+  Serial.printf("[HTTP] Response code: %d\n", code);
+
+  if (code == 200) {
+    String body = http.getString();
+    Serial.println("[Body] " + body);
+    parseResponse(body);
+  } else if (code < 0) {
+    // Negative codes = connection-level failure
+    // -1 = HTTPC_ERROR_CONNECTION_REFUSED
+    // -11 = HTTPC_ERROR_READ_TIMEOUT
+    Serial.println("[HTTP] Connection failed — possible causes:");
+    Serial.println("  1. School WiFi blocks HTTPS (captive portal)");
+    Serial.println("  2. DNS not resolving — try pinging 8.8.8.8");
+    Serial.println("  3. No internet, only local network access");
+    Serial.printf("  Error code: %d\n", code);
+  } else {
+    Serial.println("[HTTP] Server error: " + http.getString());
+  }
+
+  http.end();
+}
+
+// ═════════════════════════════════════════════════════════════
+//  Parse JSON
+// ═════════════════════════════════════════════════════════════
+void parseResponse(const String& body) {
+  StaticJsonDocument<256> doc;
+  DeserializationError err = deserializeJson(doc, body);
+
+  if (err) {
+    Serial.print("[JSON] Parse error: "); Serial.println(err.c_str());
+    return;
+  }
+
+  if (!doc.is<JsonArray>() || doc.as<JsonArray>().size() == 0) {
+    Serial.println("[JSON] Empty — make sure row id=1 exists in led_control table");
+    return;
+  }
+
+  JsonObject obj = doc[0];
+  ledOn   = obj["led_on"]   | false;
+  blinkEn = obj["blink"]    | false;
+  speedMs = obj["speed_ms"] | 500;
+
+  Serial.printf("[State] led_on=%d  blink=%d  speed=%d ms\n", ledOn, blinkEn, speedMs);
+}
+
+// ═════════════════════════════════════════════════════════════
+//  WiFi — handles both open and password-protected networks
+// ═════════════════════════════════════════════════════════════
+void connectWiFi() {
+  Serial.printf("[WiFi] Connecting to: %s\n", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+
+  // ── Open network vs password-protected ────────────────────
+  if (strlen(WIFI_PASS) == 0) {
+    WiFi.begin(WIFI_SSID);           // no password — open network
+  } else {
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+  }
+
+  int tries = 0;
+  while (WiFi.status() != WL_CONNECTED && tries < 40) {
+    delay(500);
+    Serial.print(".");
+    tries++;
+  }
+
+  digitalWrite(LED_PIN, LOW);   // clean state after connect blink
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n[WiFi] ✔ Connected!");
+    Serial.println("[WiFi] IP: " + WiFi.localIP().toString());
+    Serial.println("[WiFi] Gateway: " + WiFi.gatewayIP().toString());
+
+    // ── Warn if this looks like a captive portal network ────
+    // Captive portals often assign a private gateway but block
+    // external HTTPS until you accept their login page.
+    Serial.println("[WiFi] ⚠ If Supabase fails, open a browser on");
+    Serial.println("[WiFi]   this network and check for a login page.");
+  } else {
+    Serial.println("\n[WiFi] ✘ Failed to connect");
+  }
+}
