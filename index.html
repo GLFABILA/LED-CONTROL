@@ -3,786 +3,771 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ESP32 · LED Control</title>
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<title>ESP32 LED Control</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
-* { margin:0; padding:0; box-sizing:border-box; }
+  /* ── RESET & BASE ── */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
-:root {
-  --bg:        #0c0a0a;
-  --surface:   #141010;
-  --card:      #1a1414;
-  --rim:       #2a1f1f;
-  --red:       #c0392b;
-  --red-hi:    #e74c3c;
-  --red-glow:  rgba(192,57,43,0.5);
-  --red-soft:  rgba(192,57,43,0.12);
-  --amber:     #f39c12;
-  --cyan:      #1abc9c;
-  --cyan-glow: rgba(26,188,156,0.45);
-  --text:      #e8d5d5;
-  --sub:       #7a5f5f;
-  --muted:     #4a3535;
-  --white:     #fff;
-  --off-bg:    #1e1515;
-  --on-bg:     #0d2420;
-}
+  :root {
+    --bg:       #070b10;
+    --panel:    #0d1520;
+    --border:   #1a2d45;
+    --glow-off: #1a2d45;
+    --glow-on:  #00e5ff;
+    --on:       #00e5ff;
+    --on-dim:   rgba(0,229,255,0.12);
+    --on-mid:   rgba(0,229,255,0.35);
+    --off:      #1e3a4a;
+    --text:     #c8dde8;
+    --muted:    #3a5568;
+    --white:    #ffffff;
+    --danger:   #ff4757;
+  }
 
-html, body {
-  min-height: 100vh;
-  background: var(--bg);
-  color: var(--text);
-  font-family: 'Rajdhani', sans-serif;
-  font-weight: 400;
-  overflow-x: hidden;
-}
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    overflow: hidden;
+  }
 
-body::before {
-  content: '';
-  position: fixed; inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
-  background-size: 200px;
-  pointer-events: none; z-index: 0; opacity: 0.6;
-}
+  /* ── ANIMATED GRID BACKGROUND ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(0,229,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
 
-.ambient {
-  position: fixed; inset: 0; pointer-events: none; z-index: 0;
-  background:
-    radial-gradient(ellipse 60% 40% at 20% 10%, rgba(192,57,43,0.07) 0%, transparent 70%),
-    radial-gradient(ellipse 40% 60% at 80% 90%, rgba(192,57,43,0.05) 0%, transparent 70%);
-}
+  /* ── SCAN LINE ── */
+  body::after {
+    content: '';
+    position: fixed;
+    top: -100%;
+    left: 0; right: 0;
+    height: 40%;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      rgba(0,229,255,0.015),
+      transparent
+    );
+    animation: scan 6s linear infinite;
+    pointer-events: none;
+    z-index: 0;
+  }
+  @keyframes scan { to { top: 160%; } }
 
-.wrap {
-  position: relative; z-index: 1;
-  max-width: 860px; margin: 0 auto;
-  padding: 2.5rem 1.5rem 5rem;
-}
+  /* ── LAYOUT ── */
+  .shell {
+    position: relative; z-index: 1;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2rem;
+    padding: 1.5rem;
+  }
 
-/* ── HEADER ── */
-.hdr {
-  display: flex; align-items: center;
-  justify-content: space-between;
-  margin-bottom: 2.5rem;
-  padding-bottom: 1.5rem;
-  border-bottom: 1px solid var(--rim);
-}
-.hdr-left { display:flex; align-items:center; gap:1rem; }
-.logo-mark {
-  width:42px; height:42px;
-  background: linear-gradient(135deg, var(--red), #8b1a0d);
-  border-radius: 10px;
-  display:flex; align-items:center; justify-content:center;
-  box-shadow: 0 4px 20px var(--red-glow), inset 0 1px 0 rgba(255,255,255,0.1);
-}
-.logo-mark svg { width:22px; height:22px; }
-.hdr-title { font-size: 1.35rem; font-weight: 700; letter-spacing: 0.08em; color: var(--white); line-height: 1; }
-.hdr-sub { font-family: 'JetBrains Mono', monospace; font-size: 0.62rem; color: var(--sub); letter-spacing: 0.15em; margin-top: 2px; }
-.hdr-right { display:flex; align-items:center; gap:0.8rem; }
-.chip { display:flex; align-items:center; gap:0.45rem; padding: 0.35rem 0.75rem; border: 1px solid var(--rim); border-radius: 20px; font-family: 'JetBrains Mono', monospace; font-size: 0.62rem; letter-spacing: 0.1em; color: var(--sub); }
-.chip-dot { width:7px; height:7px; border-radius:50%; background: var(--muted); transition: all 0.4s; }
-.chip-dot.on  { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); animation: pulse-dot 2.2s ease-in-out infinite; }
-.chip-dot.err { background: var(--red-hi); box-shadow: 0 0 8px var(--red-hi); }
-@keyframes pulse-dot { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
-.cfg-btn { padding: 0.38rem 0.9rem; background: transparent; border: 1px solid var(--rim); border-radius: 8px; color: var(--sub); font-family:'Rajdhani',sans-serif; font-size: 0.8rem; font-weight:600; letter-spacing:0.08em; cursor: pointer; transition: all 0.2s; }
-.cfg-btn:hover { border-color: var(--red); color: var(--red-hi); background: var(--red-soft); }
+  /* ── HEADER ── */
+  .header {
+    text-align: center;
+    animation: fadeUp 0.6s ease both;
+  }
+  .header-eyebrow {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.35em;
+    color: var(--on);
+    opacity: 0.7;
+    margin-bottom: 0.4rem;
+  }
+  .header-title {
+    font-family: 'Orbitron', monospace;
+    font-size: clamp(1.4rem, 4vw, 2.2rem);
+    font-weight: 900;
+    color: var(--white);
+    letter-spacing: 0.1em;
+    line-height: 1;
+  }
+  .header-sub {
+    font-size: 0.62rem;
+    color: var(--muted);
+    letter-spacing: 0.2em;
+    margin-top: 0.5rem;
+  }
 
-/* ── SECTION TITLE ── */
-.sec-title { font-family: 'JetBrains Mono', monospace; font-size: 0.6rem; letter-spacing: 0.25em; color: var(--sub); text-transform: uppercase; margin-bottom: 1rem; display:flex; align-items:center; gap:0.6rem; }
-.sec-title::after { content:''; flex:1; height:1px; background: linear-gradient(90deg, var(--rim), transparent); }
+  /* ── MAIN CARD ── */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2.5rem 2rem;
+    width: 100%;
+    max-width: 400px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    animation: fadeUp 0.6s 0.1s ease both;
+    transition: border-color 0.5s, box-shadow 0.5s;
+  }
+  .card.led-on {
+    border-color: var(--on-mid);
+    box-shadow: 0 0 60px rgba(0,229,255,0.1), 0 0 120px rgba(0,229,255,0.05);
+  }
 
-/* ── GRID ── */
-.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
-@media(max-width:580px){ .grid { grid-template-columns: 1fr; } }
-.col-full { grid-column: 1 / -1; }
+  /* top accent line */
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 20%; right: 20%; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--on), transparent);
+    opacity: 0;
+    transition: opacity 0.5s;
+  }
+  .card.led-on::before { opacity: 1; }
 
-/* ── CARD ── */
-.card { background: var(--card); border: 1px solid var(--rim); border-radius: 16px; padding: 1.6rem; position: relative; overflow: hidden; transition: border-color 0.3s; }
-.card:hover { border-color: #3a2828; }
-.card::before { content:''; position:absolute; top:0; left:10%; right:10%; height:1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent); pointer-events:none; }
+  /* corner brackets */
+  .card::after {
+    content: '';
+    position: absolute;
+    inset: 8px;
+    border: 1px solid transparent;
+    border-radius: 14px;
+    background:
+      linear-gradient(var(--panel), var(--panel)) padding-box,
+      linear-gradient(135deg, var(--border) 0%, transparent 50%, var(--border) 100%) border-box;
+    pointer-events: none;
+    transition: background 0.5s;
+  }
 
-/* ── LED HERO ── */
-.led-hero { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 2rem; }
-@media(max-width:580px){ .led-hero { grid-template-columns:1fr; justify-items:center; gap:1.5rem; } }
+  /* ── LED BULB ── */
+  .bulb-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 2rem;
+  }
 
-/* ORB */
-.orb-shell { width: 120px; height: 120px; border-radius: 50%; display:flex; align-items:center; justify-content:center; background: radial-gradient(circle at 35% 32%, #222, #0d0d0d); border: 2px solid #1e1e1e; box-shadow: inset 0 2px 8px rgba(0,0,0,0.8), inset 0 -1px 4px rgba(255,255,255,0.02), 0 8px 32px rgba(0,0,0,0.6); position: relative; cursor: pointer; transition: all 0.5s cubic-bezier(0.23,1,0.32,1); user-select: none; }
-.orb-shell::before { content:''; position:absolute; top:12%; left:18%; width:36%; height:20%; background: rgba(255,255,255,0.08); border-radius:50%; filter:blur(4px); pointer-events:none; transition: opacity 0.5s; }
-.orb-core { width:72px; height:72px; border-radius:50%; background: radial-gradient(circle at 40% 35%, #2a2a2a, #111); border: 1px solid #222; position:relative; transition: all 0.5s cubic-bezier(0.23,1,0.32,1); }
-.orb-shell.led-on { border-color: rgba(26,188,156,0.4); box-shadow: inset 0 2px 8px rgba(0,0,0,0.5), 0 0 30px var(--cyan-glow), 0 0 80px rgba(26,188,156,0.2), 0 8px 32px rgba(0,0,0,0.4); }
-.orb-shell.led-on .orb-core { background: radial-gradient(circle at 38% 32%, #aaffee, #1abc9c, #0e6b56); border-color: rgba(26,188,156,0.6); box-shadow: 0 0 20px var(--cyan-glow); }
-.orb-shell.led-on::before { opacity: 0.25; }
-.orb-shell.blinking .orb-core { animation: ledBlink var(--spd, 500ms) ease-in-out infinite; }
-.orb-shell.blinking { animation: shellBlink var(--spd, 500ms) ease-in-out infinite; }
-@keyframes ledBlink { 0%,100% { background: radial-gradient(circle at 38% 32%, #aaffee, #1abc9c, #0e6b56); box-shadow: 0 0 20px var(--cyan-glow); } 50% { background: radial-gradient(circle at 40% 35%, #1a1a1a, #0d0d0d); box-shadow: none; } }
-@keyframes shellBlink { 0%,100% { box-shadow: inset 0 2px 8px rgba(0,0,0,0.5), 0 0 30px var(--cyan-glow), 0 0 80px rgba(26,188,156,0.2), 0 8px 32px rgba(0,0,0,0.4); } 50% { box-shadow: inset 0 2px 8px rgba(0,0,0,0.8), 0 8px 32px rgba(0,0,0,0.6); } }
-.orb-label { position:absolute; bottom:-28px; left:50%; transform:translateX(-50%); font-family:'JetBrains Mono',monospace; font-size:0.6rem; letter-spacing:0.2em; color: var(--sub); white-space:nowrap; transition: color 0.3s; }
-.orb-wrap { position:relative; padding-bottom:32px; }
+  .bulb-ring {
+    width: 140px; height: 140px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color 0.5s, box-shadow 0.5s;
+    position: relative;
+  }
+  .led-on .bulb-ring {
+    border-color: var(--on-mid);
+    box-shadow:
+      0 0 20px rgba(0,229,255,0.3),
+      0 0 60px rgba(0,229,255,0.15),
+      inset 0 0 30px rgba(0,229,255,0.05);
+  }
 
-/* LED INFO */
-.led-info { display:flex; flex-direction:column; gap:0.6rem; }
-.led-badge { display:inline-flex; align-items:center; gap:0.4rem; font-family:'JetBrains Mono',monospace; font-size:0.62rem; letter-spacing:0.1em; color: var(--sub); }
-.led-badge span { padding:0.15rem 0.4rem; border-radius:4px; background:var(--rim); color:var(--text); font-size:0.58rem; }
-.led-state-text { font-size: 2rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); transition: all 0.4s; line-height:1; }
-.led-state-text.on   { color: var(--cyan); text-shadow: 0 0 20px var(--cyan-glow); }
-.led-state-text.blink { color: var(--amber); text-shadow: 0 0 20px rgba(243,156,18,0.5); }
-.led-hint { font-family:'JetBrains Mono',monospace; font-size:0.6rem; color: var(--muted); letter-spacing:0.1em; }
+  /* rotating dashes ring */
+  .bulb-ring::before {
+    content: '';
+    position: absolute; inset: -8px;
+    border-radius: 50%;
+    border: 1px dashed var(--border);
+    transition: border-color 0.5s;
+    animation: spin 20s linear infinite;
+  }
+  .led-on .bulb-ring::before { border-color: var(--on-mid); }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ── MODE WARNING BANNER ── */
-.mode-warning {
-  display: none;
-  background: rgba(192,57,43,0.12);
-  border: 1px solid rgba(192,57,43,0.35);
-  border-radius: 8px;
-  padding: 0.5rem 0.75rem;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.6rem;
-  color: var(--red-hi);
-  letter-spacing: 0.1em;
-  margin-top: 0.25rem;
-}
-.mode-warning.show { display: block; }
+  .bulb {
+    width: 90px; height: 90px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 38% 32%, #1a2a35, #07111a);
+    border: 2px solid #1a2d45;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.5s cubic-bezier(0.23,1,0.32,1);
+    position: relative;
+    overflow: hidden;
+  }
+  .led-on .bulb {
+    background: radial-gradient(circle at 38% 32%, #afffff, #00e5ff, #006b80);
+    border-color: var(--on);
+    box-shadow: 0 0 30px rgba(0,229,255,0.8), 0 0 60px rgba(0,229,255,0.4);
+  }
 
-/* ── BLINK BUTTON ── */
-.blink-btn { width:100%; padding: 0.7rem 1rem; border-radius: 10px; border: 1.5px solid var(--rim); background: var(--off-bg); cursor:pointer; display:flex; align-items:center; justify-content:space-between; transition: all 0.3s; user-select:none; }
-.blink-btn:hover { border-color: var(--amber); }
-.blink-btn.is-on { border-color: rgba(243,156,18,0.5); background: rgba(243,156,18,0.05); box-shadow: 0 0 16px rgba(243,156,18,0.15); }
-.blink-btn-left { display:flex; align-items:center; gap:0.6rem; }
-.blink-icon { width:32px; height:32px; border-radius:8px; background:var(--rim); display:flex; align-items:center; justify-content:center; transition: background 0.3s; }
-.blink-btn.is-on .blink-icon { background: rgba(243,156,18,0.15); }
-.blink-icon svg { width:16px; height:16px; }
-.blink-icon .bi-stroke { stroke: var(--sub); transition: stroke 0.3s; }
-.blink-btn.is-on .bi-stroke { stroke: var(--amber); }
-.blink-texts { display:flex; flex-direction:column; gap:1px; }
-.blink-name { font-size:0.9rem; font-weight:600; color:var(--text); letter-spacing:0.05em; }
-.blink-desc { font-family:'JetBrains Mono',monospace; font-size:0.58rem; color:var(--sub); letter-spacing:0.1em; }
-.blink-btn.is-on .blink-name { color: var(--amber); }
-.status-pill { padding:0.2rem 0.6rem; border-radius:12px; font-family:'JetBrains Mono',monospace; font-size:0.58rem; letter-spacing:0.12em; font-weight:500; background: var(--muted); color: var(--bg); transition: all 0.3s; }
-.status-pill.off-pill { background: #2a1f1f; color: var(--sub); }
-.status-pill.on-pill  { background: var(--amber); color: #1a0e00; }
+  /* glint */
+  .bulb::after {
+    content: '';
+    position: absolute;
+    top: 12%; left: 18%; width: 30%; height: 18%;
+    background: rgba(255,255,255,0.25);
+    border-radius: 50%;
+    filter: blur(3px);
+    opacity: 0;
+    transition: opacity 0.5s;
+  }
+  .led-on .bulb::after { opacity: 1; }
 
-/* ── POWER BUTTON ── */
-.power-btn-wrap { display:flex; flex-direction:column; align-items:center; gap:0.6rem; }
-.power-btn { width:64px; height:64px; border-radius:50%; border: 2px solid var(--rim); background: var(--off-bg); cursor: pointer; display:flex; align-items:center; justify-content:center; position:relative; transition: all 0.3s cubic-bezier(0.23,1,0.32,1); box-shadow: 0 4px 16px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04); user-select:none; }
-.power-btn svg { width:26px; height:26px; transition: all 0.3s; }
-.power-btn .icon-stroke { stroke: var(--sub); transition: stroke 0.3s; }
-.power-btn:hover { border-color: var(--red); transform:scale(1.06); }
-.power-btn:hover .icon-stroke { stroke: var(--red-hi); }
-.power-btn:active { transform:scale(0.96); }
-.power-btn.is-on { border-color: var(--cyan); background: var(--on-bg); box-shadow: 0 0 24px var(--cyan-glow), 0 4px 16px rgba(0,0,0,0.4), inset 0 1px 0 rgba(26,188,156,0.1); }
-.power-btn.is-on .icon-stroke { stroke: var(--cyan); }
-.power-btn.is-on:hover { border-color: var(--cyan); transform:scale(1.06); }
-.power-btn-label { font-family:'JetBrains Mono',monospace; font-size:0.58rem; letter-spacing:0.18em; color:var(--sub); text-align:center; user-select:none; }
+  .bulb-icon {
+    width: 36px; height: 36px;
+    transition: all 0.5s;
+  }
+  .bulb-icon path, .bulb-icon circle { transition: all 0.5s; }
+  .led-on .bulb-icon .bulb-fill { fill: rgba(255,255,255,0.9); }
+  .led-on .bulb-icon .bulb-base { fill: rgba(255,255,255,0.7); }
 
-/* ── SPEED CARD ── */
-.speed-top { display:flex; align-items:flex-end; justify-content:space-between; margin-bottom:1.2rem; }
-.speed-big { font-size: 3.5rem; font-weight:700; line-height:1; color: var(--white); letter-spacing:-0.02em; }
-.speed-unit { font-size:0.8rem; color:var(--sub); margin-bottom:0.4rem; margin-left:0.2rem; }
-.speed-tag { padding:0.25rem 0.65rem; border-radius:8px; background: var(--red-soft); border: 1px solid rgba(192,57,43,0.25); font-family:'JetBrains Mono',monospace; font-size:0.6rem; letter-spacing:0.1em; color:var(--red-hi); }
-.slider-shell { position:relative; height:36px; display:flex; align-items:center; margin-bottom:0.6rem; }
-.track-bg { position:absolute; left:0; right:0; height:4px; background: var(--rim); border-radius:2px; pointer-events:none; }
-.track-fill { position:absolute; left:0; height:4px; background: linear-gradient(90deg, var(--red), var(--red-hi)); border-radius:2px; pointer-events:none; box-shadow: 0 0 10px var(--red-glow); transition: width 0.05s; }
-input[type=range] { -webkit-appearance:none; width:100%; height:36px; background:transparent; position:relative; cursor:pointer; z-index:2; }
-input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:20px; height:20px; border-radius:50%; background: var(--white); box-shadow: 0 0 0 3px var(--red-hi), 0 4px 12px rgba(0,0,0,0.5); transition: transform 0.15s, box-shadow 0.15s; cursor:grab; }
-input[type=range]::-webkit-slider-thumb:active { transform:scale(1.2); cursor:grabbing; }
-input[type=range]::-moz-range-thumb { width:18px; height:18px; border-radius:50%; background:var(--white); border: 3px solid var(--red-hi); box-shadow:0 4px 12px rgba(0,0,0,0.5); cursor:grab; }
-.speed-labels { display:flex; justify-content:space-between; font-family:'JetBrains Mono',monospace; font-size:0.58rem; color:var(--muted); letter-spacing:0.08em; margin-bottom: 1rem; }
-.presets { display:flex; gap:0.5rem; flex-wrap:wrap; }
-.pre-btn { flex:1; min-width:60px; padding: 0.5rem 0; border-radius:8px; border:1.5px solid var(--rim); background: transparent; color:var(--sub); font-family:'Rajdhani',sans-serif; font-size:0.8rem; font-weight:600; letter-spacing:0.08em; cursor:pointer; transition:all 0.2s; user-select:none; text-align:center; }
-.pre-btn:hover { border-color:var(--red); color:var(--red-hi); background:var(--red-soft); }
-.pre-btn.active { border-color: var(--red-hi); background: var(--red-soft); color: var(--white); box-shadow: 0 0 12px var(--red-glow); }
+  /* ── STATUS TEXT ── */
+  .status-label {
+    font-family: 'Orbitron', monospace;
+    font-size: 2rem;
+    font-weight: 900;
+    letter-spacing: 0.15em;
+    color: var(--muted);
+    transition: all 0.4s;
+    margin-bottom: 0.3rem;
+  }
+  .led-on .status-label {
+    color: var(--on);
+    text-shadow: 0 0 20px rgba(0,229,255,0.6);
+  }
 
-/* ── STAT CARDS ── */
-.stat-card { display:flex; flex-direction:column; gap:0.3rem; }
-.stat-num { font-size:2.4rem; font-weight:700; line-height:1; color: var(--white); letter-spacing:-0.02em; }
-.stat-label { font-family:'JetBrains Mono',monospace; font-size:0.6rem; letter-spacing:0.18em; color:var(--sub); }
-.stat-bar { height:2px; background:var(--rim); border-radius:1px; margin-top:0.8rem; overflow:hidden; }
-.stat-bar-fill { height:100%; width:0%; background:var(--red-hi); border-radius:1px; transition:width 1s linear; }
+  .status-sub {
+    font-size: 0.6rem;
+    letter-spacing: 0.2em;
+    color: var(--muted);
+    margin-bottom: 2rem;
+    transition: color 0.4s;
+    min-height: 1rem;
+  }
+  .led-on .status-sub { color: rgba(0,229,255,0.6); }
 
-/* ── WAVE ── */
-.wave-wrap { height:56px; position:relative; overflow:hidden; }
-canvas.wave { width:100%; height:56px; display:block; }
-.wave-label { position:absolute; top:4px; right:0; font-family:'JetBrains Mono',monospace; font-size:0.55rem; color:var(--muted); letter-spacing:0.12em; }
+  /* ── BIG TOGGLE BUTTON ── */
+  .toggle-btn {
+    width: 100%;
+    padding: 1rem;
+    border-radius: 12px;
+    border: 2px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    font-family: 'Orbitron', monospace;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.23,1,0.32,1);
+    position: relative;
+    overflow: hidden;
+  }
+  .toggle-btn::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: var(--on-dim);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.4s cubic-bezier(0.23,1,0.32,1);
+  }
+  .toggle-btn:hover { border-color: var(--on); color: var(--on); transform: translateY(-2px); }
+  .toggle-btn:hover::before { transform: scaleX(1); }
+  .toggle-btn:active { transform: translateY(0) scale(0.98); }
 
-/* ── LOG ── */
-.log-scroll { height:100px; overflow-y:auto; background:rgba(0,0,0,0.3); border:1px solid var(--rim); border-radius:10px; padding:0.6rem 0.75rem; font-family:'JetBrains Mono',monospace; font-size:0.6rem; line-height:1.9; scrollbar-width:thin; scrollbar-color:#2a1f1f transparent; margin-bottom:1rem; }
-.le { color:var(--muted); }
-.le .t { color:#5a3535; margin-right:0.5em; }
-.le.ok .m { color:var(--cyan); }
-.le.er .m { color:var(--red-hi); }
-.le.wa .m { color:var(--amber); }
+  .toggle-btn.is-on {
+    border-color: var(--on);
+    color: var(--white);
+    background: var(--on-dim);
+    box-shadow: 0 0 20px rgba(0,229,255,0.2), inset 0 1px 0 rgba(0,229,255,0.2);
+  }
+  .toggle-btn.is-on::before { transform: scaleX(1); }
+  .toggle-btn span { position: relative; z-index: 1; }
 
-/* ── SYNC BUTTON ── */
-.sync-btn { width:100%; padding:0.9rem; background: linear-gradient(135deg, var(--red) 0%, #9b2335 100%); border:none; border-radius:12px; color:var(--white); font-family:'Rajdhani',sans-serif; font-size:0.95rem; font-weight:700; letter-spacing:0.12em; cursor:pointer; position:relative; overflow:hidden; box-shadow: 0 4px 20px var(--red-glow), inset 0 1px 0 rgba(255,255,255,0.12); transition:all 0.25s; user-select:none; }
-.sync-btn::before { content:''; position:absolute; inset:0; background: linear-gradient(135deg, rgba(255,255,255,0.08), transparent); pointer-events:none; }
-.sync-btn:hover:not(:disabled) { box-shadow: 0 6px 32px rgba(192,57,43,0.7), inset 0 1px 0 rgba(255,255,255,0.15); transform:translateY(-2px); }
-.sync-btn:active:not(:disabled) { transform:translateY(0); }
-.sync-btn:disabled { opacity:0.4; cursor:not-allowed; }
+  /* ── STATUS ROW BELOW CARD ── */
+  .status-row {
+    display: flex;
+    gap: 1rem;
+    width: 100%;
+    max-width: 400px;
+    animation: fadeUp 0.6s 0.2s ease both;
+  }
 
-/* ── MODE NOTICE CARD ── */
-.mode-notice {
-  background: rgba(0,0,0,0.3);
-  border: 1px solid var(--rim);
-  border-radius: 10px;
-  padding: 0.75rem 1rem;
-  margin-bottom: 1rem;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.6rem;
-  color: var(--sub);
-  letter-spacing: 0.08em;
-  line-height: 1.8;
-}
-.mode-notice strong { color: var(--text); }
-.mode-notice .mode-row { display: flex; justify-content: space-between; align-items: center; padding: 0.2rem 0; border-bottom: 1px solid rgba(255,255,255,0.03); }
-.mode-notice .mode-row:last-child { border-bottom: none; }
-.mode-row .mode-val { font-weight: 600; }
-.mode-row .mode-val.v-off { color: var(--muted); }
-.mode-row .mode-val.v-on { color: var(--cyan); }
-.mode-row .mode-val.v-blink { color: var(--amber); }
+  .stat-box {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .stat-key {
+    font-size: 0.52rem;
+    letter-spacing: 0.2em;
+    color: var(--muted);
+  }
+  .stat-val {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text);
+    transition: color 0.3s;
+  }
+  .stat-val.ok   { color: var(--on); }
+  .stat-val.err  { color: var(--danger); }
+  .stat-val.dim  { color: var(--muted); }
 
-/* ── MODAL ── */
-.overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.88); z-index:9000; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
-.overlay.open { display:flex; }
-.modal-box { background: var(--card); border:1px solid #3a2828; border-radius:20px; padding:2rem; width:90%; max-width:420px; box-shadow:0 24px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.03); position:relative; }
-.modal-box::before { content:''; position:absolute; top:0; left:15%; right:15%; height:1px; background:linear-gradient(90deg,transparent,rgba(192,57,43,0.4),transparent); }
-.modal-title { font-size:1.1rem; font-weight:700; letter-spacing:0.06em; color:var(--white); margin-bottom:1.5rem; display:flex; align-items:center; gap:0.6rem; }
-.modal-title::before { content:''; width:4px; height:18px; background:var(--red-hi); border-radius:2px; }
-.fld { margin-bottom:1rem; }
-.fld label { display:block; font-family:'JetBrains Mono',monospace; font-size:0.6rem; letter-spacing:0.15em; color:var(--sub); margin-bottom:0.4rem; text-transform:uppercase; }
-.fld input { width:100%; background:rgba(0,0,0,0.4); border:1px solid var(--rim); border-radius:8px; padding:0.6rem 0.8rem; color:var(--text); font-family:'JetBrains Mono',monospace; font-size:0.72rem; outline:none; transition:border-color 0.2s; }
-.fld input:focus { border-color:var(--red); }
-.fld input::placeholder { color:var(--muted); }
-.modal-row { display:flex; gap:0.6rem; margin-top:1.4rem; }
-.cancel-btn { flex:1; padding:0.65rem; background:transparent; border:1px solid var(--rim); border-radius:10px; color:var(--sub); font-family:'Rajdhani',sans-serif; font-size:0.85rem; font-weight:600; letter-spacing:0.08em; cursor:pointer; transition:all 0.2s; }
-.cancel-btn:hover { border-color:var(--rim); color:var(--text); }
+  /* ── CONNECTION DOT ── */
+  .conn-dot {
+    display: inline-block;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--muted);
+    margin-right: 0.4rem;
+    vertical-align: middle;
+    transition: all 0.3s;
+  }
+  .conn-dot.on  { background: var(--on); box-shadow: 0 0 6px var(--on); animation: blink-dot 2s ease-in-out infinite; }
+  .conn-dot.err { background: var(--danger); }
+  @keyframes blink-dot { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
-/* ── ESP32 CODE HINT ── */
-.esp-code-banner {
-  background: rgba(0,0,0,0.5);
-  border: 1px solid #2a2a1a;
-  border-left: 3px solid var(--amber);
-  border-radius: 8px;
-  padding: 0.75rem 1rem;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.58rem;
-  color: var(--sub);
-  letter-spacing: 0.06em;
-  line-height: 2;
-  margin-bottom: 1rem;
-}
-.esp-code-banner .banner-title { color: var(--amber); font-size: 0.6rem; letter-spacing: 0.18em; margin-bottom: 0.4rem; }
-.esp-code-banner code { color: #8fba6a; }
+  /* ── CONFIG LINK ── */
+  .config-row {
+    animation: fadeUp 0.6s 0.3s ease both;
+    display: flex; gap: 0.75rem;
+  }
+  .cfg-link {
+    font-size: 0.58rem;
+    letter-spacing: 0.15em;
+    color: var(--muted);
+    cursor: pointer;
+    background: none; border: none;
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    transition: all 0.2s;
+    text-decoration: none;
+  }
+  .cfg-link:hover { color: var(--on); background: var(--on-dim); }
+
+  /* ── MODAL ── */
+  .overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 100;
+    align-items: center; justify-content: center;
+    backdrop-filter: blur(6px);
+  }
+  .overlay.open { display: flex; }
+
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem;
+    width: 90%; max-width: 380px;
+    position: relative;
+  }
+  .modal-title {
+    font-family: 'Orbitron', monospace;
+    font-size: 0.9rem; font-weight: 700;
+    letter-spacing: 0.1em; color: var(--white);
+    margin-bottom: 1.5rem;
+  }
+  .field { margin-bottom: 1rem; }
+  .field label {
+    display: block;
+    font-size: 0.55rem; letter-spacing: 0.2em;
+    color: var(--muted); margin-bottom: 0.4rem;
+  }
+  .field input {
+    width: 100%;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem 0.8rem;
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.7rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .field input:focus { border-color: var(--on); }
+  .field input::placeholder { color: var(--muted); }
+
+  .modal-btns { display: flex; gap: 0.6rem; margin-top: 1.5rem; }
+  .btn-cancel {
+    flex: 1; padding: 0.65rem;
+    background: transparent; border: 1px solid var(--border);
+    border-radius: 8px; color: var(--muted);
+    font-family: 'Orbitron', monospace;
+    font-size: 0.7rem; font-weight: 700;
+    letter-spacing: 0.1em; cursor: pointer; transition: all 0.2s;
+  }
+  .btn-cancel:hover { color: var(--text); border-color: var(--text); }
+  .btn-save {
+    flex: 2; padding: 0.65rem;
+    background: var(--on-dim); border: 1px solid var(--on);
+    border-radius: 8px; color: var(--on);
+    font-family: 'Orbitron', monospace;
+    font-size: 0.7rem; font-weight: 700;
+    letter-spacing: 0.1em; cursor: pointer; transition: all 0.2s;
+  }
+  .btn-save:hover { background: rgba(0,229,255,0.2); }
+
+  /* ── LOG STRIP ── */
+  .log-strip {
+    width: 100%; max-width: 400px;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.58rem;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    min-height: 1.6rem;
+    animation: fadeUp 0.6s 0.35s ease both;
+    transition: color 0.3s;
+  }
+  .log-strip.ok  { color: rgba(0,229,255,0.7); }
+  .log-strip.err { color: var(--danger); }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── SENDING SPINNER ── */
+  .sending {
+    display: inline-block;
+    width: 10px; height: 10px;
+    border: 2px solid var(--on-mid);
+    border-top-color: var(--on);
+    border-radius: 50%;
+    animation: spin2 0.6s linear infinite;
+    vertical-align: middle; margin-right: 0.4rem;
+  }
+  @keyframes spin2 { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
 
-<div class="ambient"></div>
-
-<div class="wrap">
+<div class="shell">
 
   <!-- HEADER -->
-  <header class="hdr">
-    <div class="hdr-left">
-      <div class="logo-mark">
-        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round">
-          <polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/>
-        </svg>
-      </div>
-      <div>
-        <div class="hdr-title">ESP32 CTRL</div>
-        <div class="hdr-sub">LED DASHBOARD · GPIO2</div>
-      </div>
-    </div>
-    <div class="hdr-right">
-      <div class="chip">
-        <div class="chip-dot" id="dot"></div>
-        <span id="conn-label">OFFLINE</span>
-      </div>
-      <button class="cfg-btn" id="cfg-open">⚙ CONFIG</button>
-    </div>
-  </header>
+  <div class="header">
+    <div class="header-eyebrow">GPIO2 · BUILT-IN LED</div>
+    <div class="header-title">ESP32 CTRL</div>
+    <div class="header-sub">SUPABASE · REALTIME AUTO-SYNC</div>
+  </div>
 
-  <div class="grid">
+  <!-- MAIN CARD -->
+  <div class="card" id="card">
 
-    <!-- ── LED MAIN CARD ── -->
-    <div class="card col-full">
-      <div class="sec-title">LED Control</div>
-      <div class="led-hero">
-
-        <!-- ORB -->
-        <div class="orb-wrap">
-          <div class="orb-shell" id="orb">
-            <div class="orb-core"></div>
-          </div>
-          <div class="orb-label" id="orb-label">STANDBY</div>
+    <!-- LED BULB -->
+    <div class="bulb-wrap">
+      <div class="bulb-ring">
+        <div class="bulb" id="bulb">
+          <!-- lightbulb SVG icon -->
+          <svg class="bulb-icon" viewBox="0 0 36 36" fill="none">
+            <path class="bulb-fill" d="M18 4C12.477 4 8 8.477 8 14c0 3.75 2.01 7.02 5 8.77V26h10v-3.23C25.99 21.02 28 17.75 28 14c0-5.523-4.477-10-10-10z" fill="#1a2d45"/>
+            <rect class="bulb-base" x="13" y="27" width="10" height="2" rx="1" fill="#1a2d45"/>
+            <rect class="bulb-base" x="14" y="30" width="8"  height="2" rx="1" fill="#1a2d45"/>
+          </svg>
         </div>
-
-        <!-- STATUS INFO -->
-        <div class="led-info">
-          <div class="led-badge">
-            <span>PIN</span> D2 / GPIO2
-            &nbsp;&nbsp;<span>TYPE</span> Built-in Blue
-          </div>
-          <div class="led-state-text" id="led-state">OFF</div>
-          <div class="led-hint" id="led-hint">Click the orb or press POWER</div>
-
-          <!-- ⚠ MODE WARNING: shown when blink is on but user expects stable -->
-          <div class="mode-warning" id="mode-warning">
-            ⚠ BLINK MODE ACTIVE — LED will not hold steady
-          </div>
-
-          <!-- BLINK BUTTON -->
-          <div style="margin-top:0.5rem;">
-            <button class="blink-btn" id="blink-btn">
-              <div class="blink-btn-left">
-                <div class="blink-icon">
-                  <svg viewBox="0 0 24 24" fill="none">
-                    <path class="bi-stroke" d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" stroke-width="2" stroke-linecap="round"/>
-                  </svg>
-                </div>
-                <div class="blink-texts">
-                  <div class="blink-name">BLINK MODE</div>
-                  <div class="blink-desc">Pulse at set interval</div>
-                </div>
-              </div>
-              <div class="status-pill off-pill" id="blink-pill">OFF</div>
-            </button>
-          </div>
-        </div>
-
-        <!-- POWER BUTTON -->
-        <div class="power-btn-wrap">
-          <button class="power-btn" id="power-btn">
-            <svg viewBox="0 0 24 24" fill="none">
-              <path class="icon-stroke" d="M12 2v10" stroke-width="2.5" stroke-linecap="round"/>
-              <path class="icon-stroke" d="M6.3 5A9 9 0 1 0 17.7 5" stroke-width="2.5" stroke-linecap="round"/>
-            </svg>
-          </button>
-          <div class="power-btn-label" id="power-label">POWER<br>OFF</div>
-        </div>
-
       </div>
     </div>
 
-    <!-- ── SPEED CARD ── -->
-    <div class="card col-full">
-      <div class="sec-title">Blink Speed <span style="margin-left:0.5rem;font-size:0.55rem;color:var(--muted)">(only applies in BLINK mode)</span></div>
-      <div class="speed-top">
-        <div style="display:flex;align-items:flex-end;gap:0.3rem;">
-          <div class="speed-big" id="spd-num">500</div>
-          <div class="speed-unit">ms / cycle</div>
-        </div>
-        <div class="speed-tag" id="spd-tag">NORMAL</div>
-      </div>
-      <div class="slider-shell">
-        <div class="track-bg"></div>
-        <div class="track-fill" id="track-fill" style="width:21%"></div>
-        <input type="range" id="spd-slider" min="100" max="2000" value="500" step="50">
-      </div>
-      <div class="speed-labels">
-        <span>← FAST (100ms)</span>
-        <span>(2000ms) SLOW →</span>
-      </div>
-      <div class="presets">
-        <button class="pre-btn" data-ms="100" data-tag="RAPID">RAPID</button>
-        <button class="pre-btn active" data-ms="500" data-tag="NORMAL">NORMAL</button>
-        <button class="pre-btn" data-ms="1000" data-tag="SLOW">SLOW</button>
-        <button class="pre-btn" data-ms="2000" data-tag="PULSE">PULSE</button>
-      </div>
-    </div>
+    <!-- STATUS -->
+    <div class="status-label" id="status-label">OFF</div>
+    <div class="status-sub"   id="status-sub">LED is off · press button to turn on</div>
 
-    <!-- ── UPTIME CARD ── -->
-    <div class="card">
-      <div class="sec-title">Session</div>
-      <div class="stat-card">
-        <div class="stat-num" id="uptime">00:00</div>
-        <div class="stat-label">UPTIME</div>
-        <div class="stat-bar"><div class="stat-bar-fill" id="upbar"></div></div>
-      </div>
-    </div>
-
-    <!-- ── COMMANDS CARD ── -->
-    <div class="card">
-      <div class="sec-title">Commands</div>
-      <div class="stat-card">
-        <div class="stat-num" id="cmd-num">0</div>
-        <div class="stat-label">SYNCED THIS SESSION</div>
-        <div class="stat-bar"><div class="stat-bar-fill" id="cmdbar" style="background:var(--cyan);"></div></div>
-      </div>
-    </div>
-
-    <!-- ── WAVEFORM + LOG + SYNC ── -->
-    <div class="card col-full">
-      <div class="sec-title">Signal · Activity</div>
-      <div class="wave-wrap">
-        <canvas class="wave" id="wave" width="800" height="56"></canvas>
-        <div class="wave-label" id="wave-label">IDLE</div>
-      </div>
-      <div style="height:0.8rem;"></div>
-
-      <!-- PAYLOAD PREVIEW — shows exactly what ESP32 will receive -->
-      <div class="mode-notice" id="payload-preview">
-        <div class="mode-row"><span>led_on</span><span class="mode-val v-off" id="prev-ledon">false</span></div>
-        <div class="mode-row"><span>blink</span><span class="mode-val v-off" id="prev-blink">false</span></div>
-        <div class="mode-row"><span>speed_ms</span><span class="mode-val" id="prev-speed">500</span></div>
-        <div class="mode-row"><span>→ ESP32 behavior</span><span class="mode-val v-off" id="prev-behavior">LED OFF</span></div>
-      </div>
-
-      <!-- ESP32 FIRMWARE NOTE -->
-      <div class="esp-code-banner">
-        <div class="banner-title">▲ ESP32 FIRMWARE — STABLE ON/OFF FIX</div>
-        Read <code>led_on</code> AND <code>blink</code> separately. When <code>led_on=true</code> &amp; <code>blink=false</code> → <code>digitalWrite(LED, HIGH)</code> and hold. When <code>blink=true</code> → run blink loop. When <code>led_on=false</code> → <code>digitalWrite(LED, LOW)</code> and hold. Do NOT default to blink.
-      </div>
-
-      <div class="log-scroll" id="log"></div>
-      <button class="sync-btn" id="sync-btn">▶ &nbsp; SYNC TO ESP32</button>
-    </div>
+    <!-- TOGGLE BUTTON -->
+    <button class="toggle-btn" id="toggle-btn" onclick="toggleLED()">
+      <span id="btn-text">⏻ &nbsp; TURN ON</span>
+    </button>
 
   </div>
+
+  <!-- STATS ROW -->
+  <div class="status-row">
+    <div class="stat-box">
+      <div class="stat-key">CONNECTION</div>
+      <div class="stat-val dim" id="conn-val">
+        <span class="conn-dot" id="conn-dot"></span>
+        <span id="conn-text">OFFLINE</span>
+      </div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-key">LAST UPDATE</div>
+      <div class="stat-val dim" id="sync-val">—</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-key">COMMANDS</div>
+      <div class="stat-val dim" id="cmd-val">0</div>
+    </div>
+  </div>
+
+  <!-- LOG STRIP -->
+  <div class="log-strip" id="log">Ready · configure Supabase to connect</div>
+
+  <!-- CONFIG / LINKS -->
+  <div class="config-row">
+    <button class="cfg-link" onclick="openCfg()">⚙ CONFIG</button>
+  </div>
+
 </div>
 
 <!-- CONFIG MODAL -->
 <div class="overlay" id="overlay">
-  <div class="modal-box">
-    <div class="modal-title">Supabase Config</div>
-    <div class="fld">
+  <div class="modal">
+    <div class="modal-title">⚙ Supabase Config</div>
+    <div class="field">
       <label>Project URL</label>
-      <input type="text" id="c-url" placeholder="https://xxxx.supabase.co">
+      <input id="c-url" type="text" placeholder="https://xxxx.supabase.co">
     </div>
-    <div class="fld">
-      <label>Anon / Public Key</label>
-      <input type="password" id="c-key" placeholder="eyJhbGci...">
+    <div class="field">
+      <label>Anon Key</label>
+      <input id="c-key" type="password" placeholder="eyJhbGci...">
     </div>
-    <div class="fld">
+    <div class="field">
       <label>Table Name</label>
-      <input type="text" id="c-table" placeholder="led_control">
+      <input id="c-table" type="text" placeholder="led_control">
     </div>
-    <div class="modal-row">
-      <button class="cancel-btn" id="cfg-cancel">Cancel</button>
-      <button class="sync-btn" style="flex:1;margin:0;" id="cfg-save">Save &amp; Connect</button>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="closeCfg()">Cancel</button>
+      <button class="btn-save"   onclick="saveCfg()">Save &amp; Connect</button>
     </div>
   </div>
 </div>
 
 <script>
-// ═══════════════════════════════════════════════════════
-//   ✏️  PASTE YOUR SUPABASE CREDENTIALS HERE
-// ═══════════════════════════════════════════════════════
-const SB_URL   = "https://kjfumdyatvvthmbzrhvm.supabase.co";
-const SB_KEY   = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtqZnVtZHlhdHZ2dGhtYnpyaHZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MDE4ODksImV4cCI6MjA5MDM3Nzg4OX0.yVpYIQgYEm1W2W2pzsY5vphnACShkJA_mBRJK2soAPc";
-const SB_TABLE = "led_control";
-// ═══════════════════════════════════════════════════════
+// ══════════════════════════════════════════════
+//  PASTE YOUR CREDENTIALS HERE (optional)
+//  Or use the ⚙ CONFIG button at runtime
+// ══════════════════════════════════════════════
+const DEFAULT_URL   = "https://kjfumdyatvvthmbzrhvm.supabase.co";
+const DEFAULT_KEY   = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtqZnVtZHlhdHZ2dGhtYnpyaHZtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4MDE4ODksImV4cCI6MjA5MDM3Nzg4OX0.yVpYIQgYEm1W2W2pzsY5vphnACShkJA_mBRJK2soAPc";
+const DEFAULT_TABLE = "led_control";
+// ══════════════════════════════════════════════
 
-// ── State ──────────────────────────────────────────────
-let sb       = null;
-let ledOn    = false;
-let blinkOn  = false;
-let speedMs  = 500;
-let cmds     = 0;
-let wRAF     = null;
-let wPhase   = 0;
-const t0 = Date.now();
+let sb        = null;
+let ledOn     = false;
+let cmdCount  = 0;
+let isSending = false;
 
-// ── DOM ────────────────────────────────────────────────
-const orb         = document.getElementById('orb');
-const orbLabel    = document.getElementById('orb-label');
-const ledState    = document.getElementById('led-state');
-const ledHint     = document.getElementById('led-hint');
-const powerBtn    = document.getElementById('power-btn');
-const powerLabel  = document.getElementById('power-label');
-const blinkBtn    = document.getElementById('blink-btn');
-const blinkPill   = document.getElementById('blink-pill');
-const spdNum      = document.getElementById('spd-num');
-const spdTag      = document.getElementById('spd-tag');
-const spdSlider   = document.getElementById('spd-slider');
-const trackFill   = document.getElementById('track-fill');
-const syncBtn     = document.getElementById('sync-btn');
+// ── DOM refs ──────────────────────────────────
+const card        = document.getElementById('card');
+const bulb        = document.getElementById('bulb');
+const statusLabel = document.getElementById('status-label');
+const statusSub   = document.getElementById('status-sub');
+const toggleBtn   = document.getElementById('toggle-btn');
+const btnText     = document.getElementById('btn-text');
+const connDot     = document.getElementById('conn-dot');
+const connText    = document.getElementById('conn-text');
+const connVal     = document.getElementById('conn-val');
+const syncVal     = document.getElementById('sync-val');
+const cmdVal      = document.getElementById('cmd-val');
 const logEl       = document.getElementById('log');
-const dotEl       = document.getElementById('dot');
-const connLabel   = document.getElementById('conn-label');
 const overlay     = document.getElementById('overlay');
-const waveCanvas  = document.getElementById('wave');
-const wCtx        = waveCanvas.getContext('2d');
-const waveLabel   = document.getElementById('wave-label');
-const modeWarning = document.getElementById('mode-warning');
 
-// payload preview
-const prevLedon    = document.getElementById('prev-ledon');
-const prevBlink    = document.getElementById('prev-blink');
-const prevSpeed    = document.getElementById('prev-speed');
-const prevBehavior = document.getElementById('prev-behavior');
-
-// ── Config ─────────────────────────────────────────────
-function getCreds() {
-  const url   = SB_URL   !== "https://YOUR_PROJECT_ID.supabase.co" ? SB_URL   : (localStorage.getItem('sb_url')   || '');
-  const key   = SB_KEY   !== "YOUR_ANON_KEY_HERE"                  ? SB_KEY   : (localStorage.getItem('sb_key')   || '');
-  const table = SB_TABLE !== "led_control"                         ? SB_TABLE : (localStorage.getItem('sb_table') || 'led_control');
-  return { url, key, table };
-}
-
-function connect(url, key) {
-  try {
-    sb = window.supabase.createClient(url, key);
-    setOnline(true); addLog('Connected to Supabase ✔', 'ok');
-  } catch(e) { setOnline(false); addLog('Connect failed: ' + e.message, 'er'); }
-}
-
-function loadCfg() {
-  const { url, key, table } = getCreds();
+// ── Init ──────────────────────────────────────
+window.addEventListener('load', () => {
+  const url   = localStorage.getItem('sb_url')   || DEFAULT_URL;
+  const key   = localStorage.getItem('sb_key')   || DEFAULT_KEY;
+  const table = localStorage.getItem('sb_table') || DEFAULT_TABLE;
   document.getElementById('c-url').value   = url;
   document.getElementById('c-key').value   = key;
   document.getElementById('c-table').value = table;
   if (url && key) connect(url, key);
+});
+
+// ── Connect to Supabase ───────────────────────
+let realtimeChannel = null;
+
+function connect(url, key) {
+  try {
+    sb = window.supabase.createClient(url, key);
+    setConn(true);
+    setLog('Connected · listening for changes...', 'ok');
+    fetchState();      // get current state immediately on connect
+    subscribeRealtime(); // then watch for live changes
+  } catch(e) {
+    setConn(false);
+    setLog('Connection failed: ' + e.message, 'err');
+  }
 }
+
+// ── Fetch current LED state from Supabase ─────
+async function fetchState() {
+  if (!sb) return;
+  const table = getTable();
+  try {
+    const { data, error } = await sb.from(table).select('led_on').eq('id', 1).single();
+    if (error) throw error;
+    ledOn = data.led_on;
+    render();
+    syncVal.textContent = new Date().toLocaleTimeString();
+    syncVal.className   = 'stat-val ok';
+  } catch(e) {
+    setLog('Fetch error: ' + e.message, 'err');
+  }
+}
+
+// ── Supabase Realtime — fires instantly when DB row changes ──
+// No polling needed. ESP32 writes to Supabase → dashboard updates immediately.
+function subscribeRealtime() {
+  if (!sb) return;
+
+  // Remove old channel if reconnecting
+  if (realtimeChannel) {
+    sb.removeChannel(realtimeChannel);
+    realtimeChannel = null;
+  }
+
+  const table = getTable();
+
+  realtimeChannel = sb
+    .channel('led-control-changes')
+    .on(
+      'postgres_changes',
+      {
+        event:  'UPDATE',          // fire on any UPDATE to the row
+        schema: 'public',
+        table:  table,
+        filter: 'id=eq.1'         // only watch row id=1
+      },
+      (payload) => {
+        // payload.new contains the updated row
+        const newLedOn = payload.new.led_on;
+        if (newLedOn !== ledOn) {
+          ledOn = newLedOn;
+          render();
+          cmdCount++;
+          cmdVal.textContent  = cmdCount;
+          cmdVal.className    = 'stat-val ok';
+          syncVal.textContent = new Date().toLocaleTimeString();
+          syncVal.className   = 'stat-val ok';
+          setLog((ledOn ? '▶ ESP32 → LED ON' : '■ ESP32 → LED OFF') + ' · auto-synced', 'ok');
+        }
+      }
+    )
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        setLog('Realtime active · dashboard auto-updates instantly', 'ok');
+      } else if (status === 'CHANNEL_ERROR') {
+        setLog('Realtime error — retrying...', 'err');
+        // Retry after 3s
+        setTimeout(subscribeRealtime, 3000);
+      }
+    });
+}
+
+// ── Toggle LED ────────────────────────────────
+async function toggleLED() {
+  if (!sb)        { setLog('Not connected — use ⚙ CONFIG first', 'err'); return; }
+  if (isSending)  { return; }
+
+  isSending = true;
+  ledOn = !ledOn;   // optimistic update — show change instantly
+  render();
+  setSending(true);
+
+  try {
+    const table = getTable();
+    const { error } = await sb.from(table).upsert([{
+      id:         1,
+      led_on:     ledOn,
+      blink:      false,     // always false — no accidental blink
+      speed_ms:   500,
+      updated_at: new Date().toISOString()
+    }]);
+    if (error) throw error;
+
+    cmdCount++;
+    cmdVal.textContent = cmdCount;
+    cmdVal.className = 'stat-val ok';
+    syncVal.textContent = new Date().toLocaleTimeString();
+    syncVal.className = 'stat-val ok';
+    setLog((ledOn ? '✔ LED turned ON' : '✔ LED turned OFF') + ' · synced to Supabase', 'ok');
+
+  } catch(e) {
+    // Rollback on failure
+    ledOn = !ledOn;
+    render();
+    setLog('Sync failed: ' + e.message, 'err');
+  } finally {
+    isSending = false;
+    setSending(false);
+  }
+}
+
+// ── Render UI to match ledOn state ───────────
+function render() {
+  card.classList.toggle('led-on', ledOn);
+
+  statusLabel.textContent = ledOn ? 'ON' : 'OFF';
+  statusSub.textContent   = ledOn
+    ? 'LED is ON · solid, no blinking'
+    : 'LED is off · press button to turn on';
+
+  toggleBtn.classList.toggle('is-on', ledOn);
+  btnText.innerHTML = ledOn
+    ? '⏻ &nbsp; TURN OFF'
+    : '⏻ &nbsp; TURN ON';
+}
+
+// ── Sending state ────────────────────────────
+function setSending(v) {
+  if (v) {
+    btnText.innerHTML = '<span class="sending"></span> SYNCING...';
+    toggleBtn.disabled = true;
+  } else {
+    toggleBtn.disabled = false;
+    render();
+  }
+}
+
+// ── Helpers ───────────────────────────────────
+function setConn(online) {
+  connDot.className  = 'conn-dot ' + (online ? 'on' : 'err');
+  connText.textContent = online ? 'ONLINE' : 'OFFLINE';
+  connVal.className  = 'stat-val ' + (online ? 'ok' : 'err');
+}
+
+function setLog(msg, type) {
+  logEl.textContent = msg;
+  logEl.className   = 'log-strip ' + (type || '');
+}
+
+function getTable() {
+  return localStorage.getItem('sb_table') || DEFAULT_TABLE;
+}
+
+// ── Config modal ──────────────────────────────
+function openCfg() { overlay.classList.add('open'); }
+function closeCfg() { overlay.classList.remove('open'); }
 
 function saveCfg() {
   const url   = document.getElementById('c-url').value.trim();
   const key   = document.getElementById('c-key').value.trim();
   const table = document.getElementById('c-table').value.trim() || 'led_control';
-  if (!url || !key) { addLog('URL and Key are required', 'er'); return; }
-  localStorage.setItem('sb_url', url);
-  localStorage.setItem('sb_key', key);
+  if (!url || !key) { setLog('URL and Key required', 'err'); return; }
+  localStorage.setItem('sb_url',   url);
+  localStorage.setItem('sb_key',   key);
   localStorage.setItem('sb_table', table);
-  overlay.classList.remove('open');
-  connect(url, key);
+  closeCfg();
+  connect(url, key);  // reconnects + re-subscribes realtime
 }
 
-function setOnline(v) {
-  dotEl.className       = 'chip-dot ' + (v ? 'on' : 'err');
-  connLabel.textContent = v ? 'ONLINE' : 'OFFLINE';
-}
-
-// ── LED ────────────────────────────────────────────────
-function togglePower() {
-  ledOn = !ledOn;
-  // KEY FIX: turning power OFF always clears blink too
-  // This ensures ESP32 receives a clean OFF state with blink=false
-  if (!ledOn) blinkOn = false;
-  render();
-  addLog('LED power ' + (ledOn ? 'ON (solid)' : 'OFF'), ledOn ? 'ok' : 'wa');
-}
-
-function toggleBlink() {
-  if (!ledOn) { addLog('Turn LED on first', 'wa'); return; }
-  blinkOn = !blinkOn;
-  render();
-  addLog('Blink ' + (blinkOn ? 'enabled @ ' + speedMs + 'ms' : 'disabled — LED is now solid ON'), blinkOn ? 'ok' : 'wa');
-}
-
-// ── KEY FIX: Compute the unambiguous ESP32 mode ─────────
-// Returns one of: 'OFF' | 'ON' | 'BLINK'
-// This is what gets written to Supabase — no ambiguity.
-function resolveMode() {
-  if (!ledOn)            return 'OFF';
-  if (ledOn && blinkOn)  return 'BLINK';
-  return 'ON';            // ledOn=true, blinkOn=false → always stable
-}
-
-function render() {
-  const mode = resolveMode();
-
-  // Orb visual
-  orb.classList.toggle('led-on', mode !== 'OFF');
-  orb.classList.toggle('blinking', mode === 'BLINK');
-  orb.style.setProperty('--spd', speedMs + 'ms');
-
-  // Orb label
-  const lbTxt = mode === 'OFF' ? 'STANDBY' : mode === 'BLINK' ? 'BLINKING' : 'ACTIVE';
-  orbLabel.textContent = lbTxt;
-  orbLabel.className = 'orb-label' + (mode !== 'OFF' ? ' active' : '');
-
-  // State text
-  ledState.className = 'led-state-text' + (mode === 'OFF' ? '' : mode === 'BLINK' ? ' blink' : ' on');
-  ledState.textContent = mode;
-
-  // Hint
-  if (mode === 'OFF')   ledHint.textContent = 'Click POWER to turn on';
-  if (mode === 'ON')    ledHint.textContent = 'LED is solid ON — stable, no flicker';
-  if (mode === 'BLINK') ledHint.textContent = 'Blinking at ' + speedMs + 'ms intervals';
-
-  // Mode warning — only show when blink is ON
-  modeWarning.classList.toggle('show', mode === 'BLINK');
-
-  // Power button
-  powerBtn.classList.toggle('is-on', mode !== 'OFF');
-  powerLabel.innerHTML = 'POWER<br>' + (mode !== 'OFF' ? '<span style="color:var(--cyan)">ON</span>' : 'OFF');
-
-  // Blink button
-  blinkBtn.classList.toggle('is-on', mode === 'BLINK');
-  blinkPill.textContent = mode === 'BLINK' ? 'ON' : 'OFF';
-  blinkPill.className   = 'status-pill ' + (mode === 'BLINK' ? 'on-pill' : 'off-pill');
-
-  // Wave
-  if (mode === 'BLINK') startWave(); else stopWave();
-
-  // ── Payload preview — shows exact data ESP32 will read ──
-  // KEY FIX: blink is ALWAYS false when mode is ON or OFF
-  // This prevents ESP32 from reading stale blink=true with led_on=true
-  const payload = buildPayload(mode);
-  prevLedon.textContent = String(payload.led_on);
-  prevLedon.className   = 'mode-val ' + (payload.led_on ? 'v-on' : 'v-off');
-  prevBlink.textContent = String(payload.blink);
-  prevBlink.className   = 'mode-val ' + (payload.blink ? 'v-blink' : 'v-off');
-  prevSpeed.textContent = payload.speed_ms + 'ms';
-  prevBehavior.textContent = mode === 'OFF' ? 'LED OFF (hold LOW)' : mode === 'ON' ? 'LED ON (hold HIGH)' : 'LED BLINK @ ' + speedMs + 'ms';
-  prevBehavior.className   = 'mode-val ' + (mode === 'OFF' ? 'v-off' : mode === 'ON' ? 'v-on' : 'v-blink');
-}
-
-// ── KEY FIX: Single source of truth for what gets written ──
-// blink is ONLY true when mode is explicitly BLINK.
-// led_on is ONLY true when mode is ON or BLINK.
-// This eliminates the "blink=true stuck in DB" bug.
-function buildPayload(mode) {
-  const m = mode || resolveMode();
-  return {
-    id: 1,
-    led_on:     m !== 'OFF',            // true only when ON or BLINK
-    blink:      m === 'BLINK',          // true ONLY when blinking — never left as stale true
-    speed_ms:   speedMs,
-    updated_at: new Date().toISOString()
-  };
-}
-
-// ── Speed ──────────────────────────────────────────────
-function setSpeed(val, tag) {
-  speedMs = parseInt(val);
-  spdSlider.value     = speedMs;
-  spdNum.textContent  = speedMs;
-  const pct = ((speedMs - 10) / 1900) * 10;
-  trackFill.style.width = pct + '%';
-  const tags = {10:'RAPID',200:'RAPID',300:'FAST',400:'FAST',500:'NORMAL',600:'NORMAL',700:'NORMAL',800:'STEADY',900:'STEADY',1000:'SLOW',1500:'SLOW',2000:'PULSE'};
-  spdTag.textContent = tag || tags[speedMs] || (speedMs < 100 ? 'FAST' : speedMs < 800 ? 'NORMAL' : speedMs < 1400 ? 'SLOW' : 'PULSE');
-  document.querySelectorAll('.pre-btn').forEach(b => {
-    b.classList.toggle('active', parseInt(b.dataset.ms) === speedMs);
-  });
-  orb.style.setProperty('--spd', speedMs + 'ms');
-  if (blinkOn) restartWave();
-  render(); // update preview
-}
-
-// ── Sync ───────────────────────────────────────────────
-async function syncNow() {
-  if (!sb) { addLog('Not connected — configure Supabase first', 'er'); return; }
-  const { table } = getCreds();
-  syncBtn.disabled = true; syncBtn.textContent = '⏳  SYNCING...';
-  try {
-    const mode    = resolveMode();
-    const payload = buildPayload(mode);
-
-    const { error } = await sb.from(table).upsert([payload]);
-    if (error) throw error;
-
-    cmds++;
-    document.getElementById('cmd-num').textContent = cmds;
-    document.getElementById('cmdbar').style.width = Math.min(cmds * 10, 100) + '%';
-
-    // Log clear unambiguous state
-    const stateStr = mode === 'OFF'   ? 'LED:OFF blink:false'
-                   : mode === 'ON'    ? 'LED:ON (solid) blink:false'
-                   :                    'LED:ON blink:true speed:' + speedMs + 'ms';
-    addLog('Sync OK — ' + stateStr, 'ok');
-
-  } catch(e) {
-    addLog('Sync failed: ' + e.message, 'er');
-  } finally {
-    syncBtn.disabled = false; syncBtn.textContent = '▶ \u00a0 SYNC TO ESP32';
-  }
-}
-
-// ── Wave ───────────────────────────────────────────────
-function startWave() {
-  if (wRAF) return;
-  waveLabel.textContent = 'SIGNAL ACTIVE';
-  function draw() {
-    const W = waveCanvas.width, H = waveCanvas.height;
-    wCtx.clearRect(0,0,W,H);
-    const freq = (2000 / speedMs) * 0.045;
-    wCtx.beginPath();
-    for (let x=0; x<W; x++) {
-      const t = (x/W) * Math.PI * 10 + wPhase;
-      const smooth = Math.tanh(Math.sin(t) * 8);
-      const y = H/2 - smooth * 18;
-      x===0 ? wCtx.moveTo(x,y) : wCtx.lineTo(x,y);
-    }
-    wCtx.strokeStyle = 'rgba(26,188,156,0.75)';
-    wCtx.lineWidth = 1.5;
-    wCtx.shadowColor = '#1abc9c';
-    wCtx.shadowBlur = 10;
-    wCtx.stroke();
-    wCtx.beginPath();
-    for (let x=0; x<W; x++) {
-      const t = (x/W)*Math.PI*10+wPhase;
-      const smooth = Math.tanh(Math.sin(t)*8);
-      const y = H/2 - smooth*18;
-      x===0 ? wCtx.moveTo(x,y) : wCtx.lineTo(x,y);
-    }
-    wCtx.lineTo(W, H/2); wCtx.lineTo(0, H/2);
-    wCtx.fillStyle = 'rgba(26,188,156,0.05)';
-    wCtx.shadowBlur = 0;
-    wCtx.fill();
-    wPhase += freq;
-    wRAF = requestAnimationFrame(draw);
-  }
-  draw();
-}
-
-function stopWave() {
-  if (wRAF) { cancelAnimationFrame(wRAF); wRAF = null; }
-  const W = waveCanvas.width, H = waveCanvas.height;
-  wCtx.clearRect(0,0,W,H);
-  wCtx.beginPath();
-  wCtx.moveTo(0,H/2); wCtx.lineTo(W,H/2);
-  wCtx.strokeStyle='rgba(255,255,255,0.05)';
-  wCtx.lineWidth=1; wCtx.shadowBlur=0; wCtx.stroke();
-  waveLabel.textContent = 'IDLE';
-}
-
-function restartWave() {
-  if (wRAF) { cancelAnimationFrame(wRAF); wRAF=null; startWave(); }
-}
-
-// ── Log ────────────────────────────────────────────────
-function addLog(msg, type) {
-  const ts = new Date().toTimeString().slice(0,8);
-  const d  = document.createElement('div');
-  d.className = 'le ' + (type||'');
-  d.innerHTML = `<span class="t">[${ts}]</span><span class="m">${msg}</span>`;
-  logEl.appendChild(d);
-  logEl.scrollTop = logEl.scrollHeight;
-}
-
-// ── Uptime ─────────────────────────────────────────────
-setInterval(() => {
-  const s  = Math.floor((Date.now()-t0)/1000);
-  const mm = String(Math.floor(s/60)).padStart(2,'0');
-  const ss = String(s%60).padStart(2,'0');
-  document.getElementById('uptime').textContent = mm+':'+ss;
-  const pct = Math.min((s/3600)*100,100);
-  document.getElementById('upbar').style.width = pct+'%';
-}, 1000);
-
-// ── Events ─────────────────────────────────────────────
-orb.addEventListener('click', togglePower);
-powerBtn.addEventListener('click', togglePower);
-blinkBtn.addEventListener('click', toggleBlink);
-spdSlider.addEventListener('input', () => setSpeed(spdSlider.value));
-document.querySelectorAll('.pre-btn').forEach(b => {
-  b.addEventListener('click', () => setSpeed(b.dataset.ms, b.dataset.tag));
+// close modal on backdrop click
+overlay.addEventListener('click', e => {
+  if (e.target === overlay) closeCfg();
 });
-syncBtn.addEventListener('click', syncNow);
-document.getElementById('cfg-open').addEventListener('click', () => overlay.classList.add('open'));
-document.getElementById('cfg-cancel').addEventListener('click', () => overlay.classList.remove('open'));
-document.getElementById('cfg-save').addEventListener('click', saveCfg);
-overlay.addEventListener('click', e => { if(e.target===overlay) overlay.classList.remove('open'); });
-
-// ── Init ───────────────────────────────────────────────
-loadCfg();
-stopWave();
-setSpeed(500, 'NORMAL');
-render();
-addLog('Dashboard ready — stable ON/OFF fix applied', 'ok');
-addLog('blink field is now ALWAYS false when LED is solid ON', 'ok');
-addLog('Paste credentials in JS or use ⚙ CONFIG', '');
 </script>
 </body>
 </html>
